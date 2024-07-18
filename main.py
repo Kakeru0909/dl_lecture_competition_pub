@@ -11,6 +11,34 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
+"""
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+
+
+import autocorrect
+from autocorrect import Speller
+
+# 初回のみ実行
+#nltk.download('stopwords')
+#nltk.download('wordnet')
+
+# インスタンスの作成
+#stop_words = set(stopwords.words('english'))
+#stemmer = PorterStemmer()
+#lemmatizer = WordNetLemmatizer()
+spell = Speller()
+
+# 簡易的なストップワードリストとステミング関数を作成
+stop_words = set(['a', 'an', 'the', 'is', 'in', 'at', 'of', 'on', 'and', 'to'])
+def simple_stemmer(word):
+    suffixes = ['ing', 'ly', 'ed', 'ious', 'ies', 'ive', 'es', 's', 'ment']
+    for suffix in suffixes:
+        if word.endswith(suffix):
+            return word[:-len(suffix)]
+    return word
+"""
 
 def set_seed(seed):
     random.seed(seed)
@@ -61,13 +89,68 @@ def process_text(text):
     return text
 
 
+"""
+def process_text(text):
+    # lowercase
+    text = text.lower()
+
+    # 数詞を数字に変換
+    num_word_to_digit = {
+        'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
+        'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+        'ten': '10'
+    }
+    for word, digit in num_word_to_digit.items():
+        text = text.replace(word, digit)
+
+    # 小数点のピリオドを削除
+    text = re.sub(r'(?<!\d)\.(?!\d)', '', text)
+
+    # 冠詞の削除
+    text = re.sub(r'\b(a|an|the)\b', '', text)
+
+    # 短縮形のカンマの追加
+    contractions = {
+        "dont": "don't", "isnt": "isn't", "arent": "aren't", "wont": "won't",
+        "cant": "can't", "wouldnt": "wouldn't", "couldnt": "couldn't"
+    }
+    for contraction, correct in contractions.items():
+        text = text.replace(contraction, correct)
+
+    # 句読点をスペースに変換
+    text = re.sub(r"[^\w\s':]", ' ', text)
+
+    # 連続するスペースを1つに変換
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # スペルチェックと修正
+    text = spell(text)
+
+    # ストップワードの除去、ステミングまたはルーミング
+    words = text.split()
+    processed_words = []
+    for word in words:
+        if word not in stop_words:
+            stemmed_word = simple_stemmer(word)
+            processed_words.append(stemmed_word)
+
+    return ' '.join(processed_words)
+"""
+
+
+
+
 # 1. データローダーの作成
 class VQADataset(torch.utils.data.Dataset):
     def __init__(self, df_path, image_dir, transform=None, answer=True):
         self.transform = transform  # 画像の前処理
+        #print("self.transform")
         self.image_dir = image_dir  # 画像ファイルのディレクトリ
+        #print("self.image_dir")
         self.df = pandas.read_json(df_path)  # 画像ファイルのパス，question, answerを持つDataFrame
+        #print("self.df")
         self.answer = answer
+        #print("self.answer")
 
         # question / answerの辞書を作成
         self.question2idx = {}
@@ -83,6 +166,7 @@ class VQADataset(torch.utils.data.Dataset):
                 if word not in self.question2idx:
                     self.question2idx[word] = len(self.question2idx)
         self.idx2question = {v: k for k, v in self.question2idx.items()}  # 逆変換用の辞書(question)
+        #print("forループ抜けたよ")
 
         if self.answer:
             # 回答に含まれる単語を辞書に追加
@@ -93,6 +177,7 @@ class VQADataset(torch.utils.data.Dataset):
                     if word not in self.answer2idx:
                         self.answer2idx[word] = len(self.answer2idx)
             self.idx2answer = {v: k for k, v in self.answer2idx.items()}  # 逆変換用の辞書(answer)
+        #print ("if文抜けたよ")
 
     def update_dict(self, dataset):
         """
@@ -296,6 +381,7 @@ class VQAModel(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(1024, 512),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),  # ドロップアウト（工夫点）
             nn.Linear(512, n_answer)
         )
 
@@ -318,9 +404,12 @@ def train(model, dataloader, optimizer, criterion, device):
     simple_acc = 0
 
     start = time.time()
+    print(len(dataloader))
     for image, question, answers, mode_answer in dataloader:
         image, question, answer, mode_answer = \
             image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
+        #print("1")
+        #print("2")
 
         pred = model(image, question)
         loss = criterion(pred, mode_answer.squeeze())
@@ -357,28 +446,46 @@ def eval(model, dataloader, optimizer, criterion, device):
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
-
 def main():
     # deviceの設定
     set_seed(42)
+    #print("set_seed")
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    #print("device")
 
     # dataloader / model
+    """
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
+    #print("transform")
+    """
+    transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.RandomHorizontalFlip(),  # ランダム水平反転
+    transforms.RandomRotation(10),  # ランダム回転
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),  # 色の変更
+    transforms.ToTensor()
+])
+    
+    
     train_dataset = VQADataset(df_path="./data/train.json", image_dir="./data/train", transform=transform)
+    print("train_dataset")
     test_dataset = VQADataset(df_path="./data/valid.json", image_dir="./data/valid", transform=transform, answer=False)
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Test dataset size: {len(test_dataset)}")
     test_dataset.update_dict(train_dataset)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
-
+    print(f"Number of batches in train loader: {len(train_loader)}")
+    print(f"Number of batches in test loader: {len(test_loader)}")
     model = VQAModel(vocab_size=len(train_dataset.question2idx)+1, n_answer=len(train_dataset.answer2idx)).to(device)
+    print("Model initialized")
 
     # optimizer / criterion
-    num_epoch = 20
+    num_epoch = 3 #変更済み(元は20)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
@@ -406,4 +513,5 @@ def main():
     np.save("submission.npy", submission)
 
 if __name__ == "__main__":
+    #print("mainにきたよ")
     main()
